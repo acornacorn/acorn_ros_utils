@@ -44,6 +44,8 @@ static const double PI = (boost::math::constants::pi<double>());
 int g_prec = 10;
 int g_width = 0;
 
+bool g_debug = true;
+
 static void show(tf::Quaternion q)
 {
   printf("Quat: qx=%*.*f qy=%*.*f qz=%*.*f qw=%*.*f\n",
@@ -161,7 +163,17 @@ static void show(tf::Quaternion q)
     g_width, g_prec, pitch_y2,
     g_width, g_prec, roll_x2);
 
+  printf("YPR:  yaw_z=%*.*f pitch_y=%*.*f roll_x=%*.*f  (s1 degrees)\n",
+    g_width, g_prec, yaw_z1 * 180.0/PI,
+    g_width, g_prec, pitch_y1 * 180.0/PI,
+    g_width, g_prec, roll_x1 * 180.0/PI);
+  printf("YPR:  yaw_z=%*.*f pitch_y=%*.*f roll_x=%*.*f  (s2 degrees)\n",
+    g_width, g_prec, yaw_z2 * 180.0/PI,
+    g_width, g_prec, pitch_y2 * 180.0/PI,
+    g_width, g_prec, roll_x2 * 180.0/PI);
+
 }
+
 
 bool readRot(const char **ss, tf::Quaternion *result)
 {
@@ -180,6 +192,7 @@ bool readRot(const char **ss, tf::Quaternion *result)
 
   int nv = 0;
   double v[4];
+  const char *last_e = s;
   for (; *s ; ++s)
   {
     if (*s == '*')
@@ -189,12 +202,24 @@ bool readRot(const char **ss, tf::Quaternion *result)
     if (e == s)
       continue;
     s = e;
+    last_e = e;
     nv++;
     if (nv == 4)
       break;
   }
 
+  // reset s to right after last number read
+  s = last_e;
+
   while (*s == ' ')
+    s++;
+  bool use_degrees = false;
+  if (*s == 'd')
+    use_degrees = true;
+
+  // ignore the rest of the line up to a * if any.
+  // * means multiply by another (following) rotation.
+  while (*s && *s != '*')
     s++;
 
   *ss = s;
@@ -216,20 +241,69 @@ bool readRot(const char **ss, tf::Quaternion *result)
   else if (nv == 4 && use_aa)
   {
     double angle = v[3];
-    if (*s == 'd')
+    if (use_degrees)
       angle *= PI / 180.0;
     *result = tf::Quaternion(tf::Vector3(v[0], v[1], v[2]), angle);
+    if (g_debug)
+    {
+      printf("Using aa=%*.*f %*.*f %*.*f %*.*f (%*.*f deg)\n",
+        g_width, g_prec, v[0],
+        g_width, g_prec, v[1],
+        g_width, g_prec, v[2],
+        g_width, g_prec, angle,
+        g_width, g_prec, angle * 180.0/PI);
+    }
   }
   else if (nv == 4)
   {
     *result = tf::Quaternion(v[0], v[1], v[2], v[3]);
+    if (g_debug)
+    {
+      printf("Using qx=%*.*f qy=%*.*f qz=%*.*f qw=%*.*f\n",
+        g_width, g_prec, v[0],
+        g_width, g_prec, v[1],
+        g_width, g_prec, v[2],
+        g_width, g_prec, v[3]);
+    }
   }
   else if (nv == 3)
   {
+    if (use_degrees)
+    {
+      v[0] *= PI / 180.0;
+      v[1] *= PI / 180.0;
+      v[2] *= PI / 180.0;
+    }
     if (use_rpy)
+    {
       result->setRPY(v[0], v[1], v[2]);
+      if (g_debug)
+      {
+        printf("Using rz=%*.*f ry=%*.*f rx=%*.*f\n",
+          g_width, g_prec, v[2],
+          g_width, g_prec, v[1],
+          g_width, g_prec, v[0]);
+        printf("Using rz=%*.*f ry=%*.*f rx=%*.*f degrees\n",
+          g_width, g_prec, v[2] * 180.0/PI,
+          g_width, g_prec, v[1] * 180.0/PI,
+          g_width, g_prec, v[0] * 180.0/PI);
+      }
+    }
     else
+    {
       result->setRPY(v[2], v[1], v[0]);
+      if (g_debug)
+      {
+        printf("Using rz=%*.*f ry=%*.*f rx=%*.*f\n",
+          g_width, g_prec, v[0],
+          g_width, g_prec, v[1],
+          g_width, g_prec, v[2]);
+        printf("Using rz=%*.*f ry=%*.*f rx=%*.*f degrees\n",
+          g_width, g_prec, v[0] * 180.0/PI,
+          g_width, g_prec, v[1] * 180.0/PI,
+          g_width, g_prec, v[2] * 180.0/PI);
+      }
+    }
   }
   else
   {
@@ -237,10 +311,6 @@ bool readRot(const char **ss, tf::Quaternion *result)
     return false;
   }
 
-  while (*s && *s != '*')
-    s++;
-
-  *ss = s;
   return true;
 }
 
