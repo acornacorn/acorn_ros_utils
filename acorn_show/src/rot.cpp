@@ -227,7 +227,7 @@ bool readRot(const char **ss, tf::Quaternion *result)
   else if (nv == 3)
   {
     if (use_rpy)
-      result->setRPY(v[0], v[1], v[1]);
+      result->setRPY(v[0], v[1], v[2]);
     else
       result->setRPY(v[2], v[1], v[0]);
   }
