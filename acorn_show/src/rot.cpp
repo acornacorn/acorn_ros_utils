@@ -163,18 +163,102 @@ static void show(tf::Quaternion q)
 
 }
 
+bool readRot(const char **ss, tf::Quaternion *result)
+{
+  const char *line = *ss;
+  const char *s = line;
+
+  while (*s == ' ')
+    s++;
+
+  bool use_rpy = false;
+  bool use_aa = false;
+  if (s[0] == 'r' && s[1] == 'p' && s[2] == 'y')
+    use_rpy = true;
+  if (s[0] == 'a' && s[1] == 'a')
+    use_aa = true;
+
+  int nv = 0;
+  double v[4];
+  for (; *s ; ++s)
+  {
+    if (*s == '*')
+      break;
+    char *e = NULL;
+    v[nv] = strtod(s, &e);
+    if (e == s)
+      continue;
+    s = e;
+    nv++;
+    if (nv == 4)
+      break;
+  }
+
+  while (*s == ' ')
+    s++;
+
+  *ss = s;
+
+  if (nv == 1)
+  {
+    g_prec = int(v[0]);
+    g_width = g_prec + 3;
+    printf("Setting width=%d precision=%d", g_width, g_prec);
+    return false;
+  }
+  else if (nv == 2)
+  {
+    g_width = int(v[0]);
+    g_prec = int(v[1]);
+    printf("Setting width=%d precision=%d", g_width, g_prec);
+    return false;
+  }
+  else if (nv == 4 && use_aa)
+  {
+    double angle = v[3];
+    if (*s == 'd')
+      angle *= PI / 180.0;
+    *result = tf::Quaternion(tf::Vector3(v[0], v[1], v[2]), angle);
+  }
+  else if (nv == 4)
+  {
+    *result = tf::Quaternion(v[0], v[1], v[2], v[3]);
+  }
+  else if (nv == 3)
+  {
+    if (use_rpy)
+      result->setRPY(v[0], v[1], v[1]);
+    else
+      result->setRPY(v[2], v[1], v[0]);
+  }
+  else
+  {
+    printf("Bad input line[%ld]: '%s'\n", long(s-line), line);
+    return false;
+  }
+
+  while (*s && *s != '*')
+    s++;
+
+  *ss = s;
+  return true;
+}
+
+
 int main(int argc, char *argv[])
 {
   g_width = g_prec + 3;
+  printf("INSTRUCTIONS:\n");
   printf("Setting width=%d precision=%d  (enter 1 or 2 numbers to set)\n",
     g_width, g_prec);
   printf("Quaternion: qx qy qz qw\n");
   printf("YPR:        rz ry rx (static transform publisher order)\n");
   printf("URDF:       rpy=rx ry rz   (NOTE: still applied in order rz, ry, rx)\n");
   printf("Axis Angle: aa=ax ay az angle  (follow angle by \"d\" for degrees)\n");
+  printf("Use * to concatenate rotations.\n");
   for (;;)
   {
-    printf("--------------\n");
+    printf("#######################\n");
     printf("Enter qx qy qz qw  or  rz ry rx : ");
     std::string sline;
     std::getline(std::cin, sline);
@@ -182,64 +266,30 @@ int main(int argc, char *argv[])
     int nv = 0;
     sline += ";"; // ensure there is a terminator
     const char *line = sline.c_str();
-    bool use_rpy = false;
-    bool use_aa = false;
-    if (line[0] == 'r' && line[1] == 'p' && line[2] == 'y')
-      use_rpy = true;
-    if (line[0] == 'a' && line[1] == 'a')
-      use_aa = true;
     const char *s = line;
-    for (; *s ; ++s)
-    {
-      char *e = NULL;
-      v[nv] = strtod(s, &e);
-      if (e == s)
-        continue;
-      s = e;
-      nv++;
-      if (nv == 4)
-        break;
-    }
 
     tf::Quaternion q;
-    if (nv == 1)
+    if (readRot(&s, &q))
     {
-      g_prec = int(v[0]);
-      g_width = g_prec + 3;
-      printf("Setting width=%d precision=%d", g_width, g_prec);
-    }
-    else if (nv == 2)
-    {
-      g_width = int(v[0]);
-      g_prec = int(v[1]);
-      printf("Setting width=%d precision=%d", g_width, g_prec);
-    }
-    else if (nv == 4 && use_aa)
-    {
-      double angle = v[3];
-      while (*s == ' ')
+      show(q);
+
+      while (*s == '*')
+      {
         s++;
-      if (*s == 'd')
-        angle *= PI / 180.0;
-      q = tf::Quaternion(tf::Vector3(v[0], v[1], v[2]), angle);
-      show(q);
-    }
-    else if (nv == 4)
-    {
-      q = tf::Quaternion(v[0], v[1], v[2], v[3]);
-      show(q);
-    }
-    else if (nv == 3)
-    {
-      if (use_rpy)
-        q.setRPY(v[0], v[1], v[1]);
-      else
-        q.setRPY(v[2], v[1], v[0]);
-      show(q);
-    }
-    else
-    {
-      printf("Bad input line\n");
+        tf::Quaternion q2;
+        if (readRot(&s, &q2))
+        {
+          printf("------- q2:\n");
+          show(q2);
+          printf("------- PRODUCT:\n");
+          
+          tf::Quaternion q3 = q * q2;
+          show(q3);
+          q = q3;
+        }
+        else
+          break;
+      }
     }
   }
 }
