@@ -46,6 +46,91 @@ int g_width = 0;
 
 bool g_debug = true;
 
+static void canonicalize(tf::Quaternion& q)
+{
+  q.normalize();
+  if (q.w() < 0.0)
+    q *= -1.0;
+}
+
+static void MatrixToYPR(
+  const tf::Matrix3x3& m,
+  double *yaw,
+  double *pitch,
+  double *roll,
+  int solution=0)
+{
+#if 0
+printf("  M\n");
+printf("  %10.4f  %10.4f %10.4f\n",
+m[0][0],
+m[0][1],
+m[0][2]);
+printf("  %10.4f  %10.4f %10.4f\n",
+m[1][0],
+m[1][1],
+m[1][2]);
+printf("  %10.4f  %10.4f %10.4f\n",
+m[2][0],
+m[2][1],
+m[2][2]);
+#endif
+  double x,y,z = 0;
+  if (std::abs(m[2][0]) < 1.0)
+  {
+    y = -asin(m[2][0]);
+    if (solution)
+      y = PI - y;
+    double cy = cos(y);
+    x = atan2(m[2][1]/cy, m[2][2]/cy);
+    z = atan2(m[1][0]/cy, m[0][0]/cy);
+printf("~~~~~ case 1\n");
+  }
+
+#if 0
+  else
+  {
+    x = atan2(m[2][1], m[2][2]);
+printf("x = atan2(m[2][1], m[2][2]) = atan2(%f , %f) = %f\n",
+m[2][1], m[2][2], x);
+    if (m[2][0] < 0)
+    {
+      y = PI * 0.5;
+printf("~~~~~ case 2\n");
+    }
+    else
+    {
+      y = -PI * 0.5;
+printf("~~~~~ case 3\n");
+    }
+  }
+
+#else
+  else if (m[2][0] < 0.0)
+  {
+    y = PI * 0.5;
+    x = atan2(m[0][1], m[0][2]);
+printf("~~~~~ case 2      WARNING tf::getEulerYPR BROKEN FOR THIS CASE\n");
+printf("x = atan2(m[0][1], m[0][2]) = atan2(%f , %f) = %f\n",
+  m[0][1], m[0][2], x);
+
+  }
+  else
+  {
+    y = -PI * 0.5;
+    x = atan2(-m[0][1], -m[0][2]);
+printf("~~~~~ case 3      WARNING tf::getEulerYPR BROKEN FOR THIS CASE\n");
+printf("x = atan2(-m[0][1], -m[0][2]) = atan2(%f , %f) = %f\n",
+  -m[0][1], -m[0][2], x);
+  }
+#endif
+    
+  *roll = x;    // psi
+  *pitch = y;   // theta
+  *yaw = z;     // phi
+}
+// .5 .5 .5 -.5
+
 static void show(tf::Quaternion q)
 {
   printf("Quat: qx=%*.*f qy=%*.*f qz=%*.*f qw=%*.*f\n",
@@ -53,16 +138,16 @@ static void show(tf::Quaternion q)
     g_width, g_prec, q.y(),
     g_width, g_prec, q.z(),
     g_width, g_prec, q.w());
-  q.normalize();
+  canonicalize(q);
   printf("Quat: qx=%*.*f qy=%*.*f qz=%*.*f qw=%*.*f (normalized)\n",
     g_width, g_prec, q.x(),
     g_width, g_prec, q.y(),
     g_width, g_prec, q.z(),
     g_width, g_prec, q.w());
 
+  double angle = q.getAngle();
+  tf::Vector3 axis = q.getAxis();
   {
-    double angle = q.getAngle();
-    tf::Vector3 axis = q.getAxis();
     if (angle > PI)
     {
       angle -= PI * 2.0;
@@ -143,7 +228,23 @@ static void show(tf::Quaternion q)
     g_width, g_prec, m[2][2]);
 
   double yaw_z1, pitch_y1, roll_x1;
-  m.getRPY(roll_x1, pitch_y1, yaw_z1, 1);
+  double yaw_z2, pitch_y2, roll_x2;
+#if 0
+  m.getEulerYPR(yaw_z1, pitch_y1, roll_x1, 1);
+  m.getEulerYPR(yaw_z2, pitch_y2, roll_x2, 2);
+#else
+  MatrixToYPR(m, &yaw_z1, &pitch_y1, &roll_x1, 0);
+  MatrixToYPR(m, &yaw_z2, &pitch_y2, &roll_x2, 1);
+#endif
+
+#if 0
+  double yaw_z1b, pitch_y1b, roll_x1b;
+  double yaw_z2b, pitch_y2b, roll_x2b;
+  MatrixToYPR(m, &yaw_z1b, &pitch_y1b, &roll_x1b, 0);
+  MatrixToYPR(m, &yaw_z2b, &pitch_y2b, &roll_x2b, 1);
+#endif
+
+
   printf("URDF: rpy=\"%*.*f %*.*f %*.*f\"\n",
     g_width, g_prec, roll_x1,
     g_width, g_prec, pitch_y1,
@@ -156,8 +257,6 @@ static void show(tf::Quaternion q)
     g_width, g_prec, yaw_z1,
     g_width, g_prec, pitch_y1,
     g_width, g_prec, roll_x1);
-  double yaw_z2, pitch_y2, roll_x2;
-  m.getRPY(roll_x2, pitch_y2, yaw_z2, 2);
   printf("YPR:  yaw_z=%*.*f pitch_y=%*.*f roll_x=%*.*f  (solution 2)\n",
     g_width, g_prec, yaw_z2,
     g_width, g_prec, pitch_y2,
@@ -172,6 +271,178 @@ static void show(tf::Quaternion q)
     g_width, g_prec, pitch_y2 * 180.0/PI,
     g_width, g_prec, roll_x2 * 180.0/PI);
 
+#if 0
+  printf("YPRb: yaw_z=%*.*f pitch_y=%*.*f roll_x=%*.*f  (s1 degrees)\n",
+    g_width, g_prec, yaw_z1b * 180.0/PI,
+    g_width, g_prec, pitch_y1b * 180.0/PI,
+    g_width, g_prec, roll_x1b * 180.0/PI);
+  printf("YPRb: yaw_z=%*.*f pitch_y=%*.*f roll_x=%*.*f  (s2 degrees)\n",
+    g_width, g_prec, yaw_z2b * 180.0/PI,
+    g_width, g_prec, pitch_y2b * 180.0/PI,
+    g_width, g_prec, roll_x2b * 180.0/PI);
+
+#endif
+
+  printf(" ignore below here----\n");
+
+  double e_yaw_z1, e_pitch_y1, e_roll_x1;
+  m.getEulerYPR(e_yaw_z1, e_pitch_y1, e_roll_x1, 1);
+  printf("EYPR: yaw_z=%*.*f pitch_y=%*.*f roll_x=%*.*f  (solution 1)\n",
+    g_width, g_prec, e_yaw_z1,
+    g_width, g_prec, e_pitch_y1,
+    g_width, g_prec, e_roll_x1);
+  double e_yaw_z2, e_pitch_y2, e_roll_x2;
+  m.getEulerYPR(e_yaw_z2, e_pitch_y2, e_roll_x2, 2);
+  printf("EYPR: yaw_z=%*.*f pitch_y=%*.*f roll_x=%*.*f  (solution 2)\n",
+    g_width, g_prec, e_yaw_z2,
+    g_width, g_prec, e_pitch_y2,
+    g_width, g_prec, e_roll_x2);
+
+  printf("EYPR: yaw_z=%*.*f pitch_y=%*.*f roll_x=%*.*f  (s1 degrees)\n",
+    g_width, g_prec, e_yaw_z1 * 180.0/PI,
+    g_width, g_prec, e_pitch_y1 * 180.0/PI,
+    g_width, g_prec, e_roll_x1 * 180.0/PI);
+  printf("EYPR: yaw_z=%*.*f pitch_y=%*.*f roll_x=%*.*f  (s2 degrees)\n",
+    g_width, g_prec, e_yaw_z2 * 180.0/PI,
+    g_width, g_prec, e_pitch_y2 * 180.0/PI,
+    g_width, g_prec, e_roll_x2 * 180.0/PI);
+
+
+
+
+
+
+
+
+#if 1
+  printf("Quat: qx=%*.*f qy=%*.*f qz=%*.*f qw=%*.*f (normalized)\n",
+    g_width, g_prec, q.x(),
+    g_width, g_prec, q.y(),
+    g_width, g_prec, q.z(),
+    g_width, g_prec, q.w());
+
+  tf::Quaternion mq;
+  m.getRotation(mq);
+  canonicalize(mq);
+  printf("M->Q: qx=%*.*f qy=%*.*f qz=%*.*f qw=%*.*f (normalized)\n",
+    g_width, g_prec, mq.x(),
+    g_width, g_prec, mq.y(),
+    g_width, g_prec, mq.z(),
+    g_width, g_prec, mq.w());
+
+    tf::Quaternion aaq(axis, angle);
+  canonicalize(aaq);
+  printf("A->Q: qx=%*.*f qy=%*.*f qz=%*.*f qw=%*.*f (normalized)\n",
+    g_width, g_prec, aaq.x(),
+    g_width, g_prec, aaq.y(),
+    g_width, g_prec, aaq.z(),
+    g_width, g_prec, aaq.w());
+
+  tf::Quaternion rpyq;
+  rpyq.setRPY(roll_x1, pitch_y1, yaw_z1);
+  canonicalize(rpyq);
+  printf("R->Q: qx=%*.*f qy=%*.*f qz=%*.*f qw=%*.*f (normalized)\n",
+    g_width, g_prec, rpyq.x(),
+    g_width, g_prec, rpyq.y(),
+    g_width, g_prec, rpyq.z(),
+    g_width, g_prec, rpyq.w());
+
+  tf::Quaternion rpyq2;
+  rpyq2.setRPY(roll_x2, pitch_y2, yaw_z2);
+  canonicalize(rpyq2);
+  printf("2->Q: qx=%*.*f qy=%*.*f qz=%*.*f qw=%*.*f (normalized)\n",
+    g_width, g_prec, rpyq2.x(),
+    g_width, g_prec, rpyq2.y(),
+    g_width, g_prec, rpyq2.z(),
+    g_width, g_prec, rpyq2.w());
+
+
+
+
+#if 0
+  tf::Quaternion rpyqb;
+  rpyqb.setRPY(roll_x1b, pitch_y1b, yaw_z1b);
+  canonicalize(rpyqb);
+  printf("R->Qb qx=%*.*f qy=%*.*f qz=%*.*f qw=%*.*f (normalized)\n",
+    g_width, g_prec, rpyqb.x(),
+    g_width, g_prec, rpyqb.y(),
+    g_width, g_prec, rpyqb.z(),
+    g_width, g_prec, rpyqb.w());
+
+  tf::Quaternion rpyq2b;
+  rpyq2b.setRPY(roll_x2b, pitch_y2b, yaw_z2b);
+  canonicalize(rpyq2b);
+  printf("2->Qb qx=%*.*f qy=%*.*f qz=%*.*f qw=%*.*f (normalized)\n",
+    g_width, g_prec, rpyq2b.x(),
+    g_width, g_prec, rpyq2b.y(),
+    g_width, g_prec, rpyq2b.z(),
+    g_width, g_prec, rpyq2b.w());
+#endif
+
+
+
+
+
+
+
+  tf::Quaternion e_rpyq;
+  e_rpyq.setEuler(e_yaw_z1, e_pitch_y1, e_roll_x1);
+  canonicalize(e_rpyq);
+  printf("E->Q: qx=%*.*f qy=%*.*f qz=%*.*f qw=%*.*f (normalized)\n",
+    g_width, g_prec, e_rpyq.x(),
+    g_width, g_prec, e_rpyq.y(),
+    g_width, g_prec, e_rpyq.z(),
+    g_width, g_prec, e_rpyq.w());
+
+  tf::Quaternion e_rpyq2;
+  e_rpyq2.setEuler(e_yaw_z2, e_pitch_y2, e_roll_x2);
+  canonicalize(e_rpyq2);
+  printf("2->Q: qx=%*.*f qy=%*.*f qz=%*.*f qw=%*.*f (normalized)\n",
+    g_width, g_prec, e_rpyq2.x(),
+    g_width, g_prec, e_rpyq2.y(),
+    g_width, g_prec, e_rpyq2.z(),
+    g_width, g_prec, e_rpyq2.w());
+
+
+
+
+
+  tf::Quaternion e_rpyqb;
+  e_rpyqb.setEuler(e_roll_x1, e_pitch_y1, e_yaw_z1);
+  canonicalize(e_rpyqb);
+  printf("E>>Q: qx=%*.*f qy=%*.*f qz=%*.*f qw=%*.*f (normalized)\n",
+    g_width, g_prec, e_rpyqb.x(),
+    g_width, g_prec, e_rpyqb.y(),
+    g_width, g_prec, e_rpyqb.z(),
+    g_width, g_prec, e_rpyqb.w());
+
+  tf::Quaternion e_rpyq2b;
+  e_rpyq2b.setEuler(e_roll_x2, e_pitch_y2, e_yaw_z2);
+  canonicalize(e_rpyq2b);
+  printf("2>>Q: qx=%*.*f qy=%*.*f qz=%*.*f qw=%*.*f (normalized)\n",
+    g_width, g_prec, e_rpyq2b.x(),
+    g_width, g_prec, e_rpyq2b.y(),
+    g_width, g_prec, e_rpyq2b.z(),
+    g_width, g_prec, e_rpyq2b.w());
+
+
+  tf::Matrix3x3 rpym;
+  rpym.setEulerYPR(e_roll_x2, e_pitch_y2, e_yaw_z2);
+  tf::Quaternion rpymq;
+  rpym.getRotation(rpymq);
+  printf("RMQ:  qx=%*.*f qy=%*.*f qz=%*.*f qw=%*.*f (normalized)\n",
+    g_width, g_prec, rpymq.x(),
+    g_width, g_prec, rpymq.y(),
+    g_width, g_prec, rpymq.z(),
+    g_width, g_prec, rpymq.w());
+
+
+
+// .5 .5 .5 -.5
+
+
+
+#endif
 }
 
 
