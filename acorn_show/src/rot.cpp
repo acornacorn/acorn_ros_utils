@@ -115,6 +115,38 @@ static void MatrixToYPR(
   *yaw = z;     // phi
 }
 
+#define QUAT_CHECK_EQUAL(q1,q2) \
+        chackQuatEqual(q1,q2,#q1,#q2,__FILE__,__LINE__)
+static bool chackQuatEqual(
+      const tf::Quaternion& q1,
+      const tf::Quaternion& q2,
+      const std::string& name1,
+      const std::string& name2,
+      const char *file,
+      int line)
+{
+  if (std::abs(q1.angleShortestPath(q2)) >
+    10.0 * std::numeric_limits<double>::epsilon())
+  {
+    printf("ERROR: QUATERNION MISMATCH at %s:%d\n",
+      file,line);
+    printf("    %20s: qx=%*.*f qy=%*.*f qz=%*.*f qw=%*.*f\n",
+      name1.c_str(),
+      g_width, g_prec, q1.x(),
+      g_width, g_prec, q1.y(),
+      g_width, g_prec, q1.z(),
+      g_width, g_prec, q1.w());
+    printf("    %20s: qx=%*.*f qy=%*.*f qz=%*.*f qw=%*.*f\n",
+      name2.c_str(),
+      g_width, g_prec, q2.x(),
+      g_width, g_prec, q2.y(),
+      g_width, g_prec, q2.z(),
+      g_width, g_prec, q2.w());
+    return false;
+  }
+  return true;
+}
+
 static void show(tf::Quaternion q)
 {
   printf("Quat: qx=%*.*f qy=%*.*f qz=%*.*f qw=%*.*f\n",
@@ -213,22 +245,14 @@ static void show(tf::Quaternion q)
   MatrixToYPR(m, &yaw_z2, &pitch_y2, &roll_x2, 1);
 #endif
 
-  printf("URDF: rpy=\"%*.*f %*.*f %*.*f\"\n",
-    g_width, g_prec, canonAngle(roll_x1),
-    g_width, g_prec, canonAngle(pitch_y1),
-    g_width, g_prec, canonAngle(yaw_z1));
-  printf("StaticTransformPub: 0 0 0 %*.*f %*.*f %*.*f  (YPR)\n",
-    g_width, g_prec, canonAngle(yaw_z1),
-    g_width, g_prec, canonAngle(pitch_y1),
-    g_width, g_prec, canonAngle(roll_x1));
   printf("YPR:  yaw_z=%*.*f pitch_y=%*.*f roll_x=%*.*f  (solution 1)\n",
-    g_width, g_prec, canonAngle(yaw_z1),
-    g_width, g_prec, canonAngle(pitch_y1),
-    g_width, g_prec, canonAngle(roll_x1));
+    2+g_width, g_prec, canonAngle(yaw_z1),
+    2+g_width, g_prec, canonAngle(pitch_y1),
+    2+g_width, g_prec, canonAngle(roll_x1));
   printf("YPR:  yaw_z=%*.*f pitch_y=%*.*f roll_x=%*.*f  (solution 2)\n",
-    g_width, g_prec, canonAngle(yaw_z2),
-    g_width, g_prec, canonAngle(pitch_y2),
-    g_width, g_prec, canonAngle(roll_x2));
+    2+g_width, g_prec, canonAngle(yaw_z2),
+    2+g_width, g_prec, canonAngle(pitch_y2),
+    2+g_width, g_prec, canonAngle(roll_x2));
 
   printf("YPR:  yaw_z=%*.*f pitch_y=%*.*f roll_x=%*.*f  (s1 degrees)\n",
     2+g_width, g_prec, canonAngle(yaw_z1) * 180.0/PI,
@@ -239,9 +263,52 @@ static void show(tf::Quaternion q)
     2+g_width, g_prec, canonAngle(pitch_y2) * 180.0/PI,
     2+g_width, g_prec, canonAngle(roll_x2) * 180.0/PI);
 
-  if (g_debug)
+  printf("URDF syntax:                rpy=\"%*.*f %*.*f %*.*f\"\n",
+    g_width, g_prec, canonAngle(roll_x1),
+    g_width, g_prec, canonAngle(pitch_y1),
+    g_width, g_prec, canonAngle(yaw_z1));
+  printf("static_transform_publisher: 0 0 0 %*.*f %*.*f %*.*f\n",
+    g_width, g_prec, canonAngle(yaw_z1),
+    g_width, g_prec, canonAngle(pitch_y1),
+    g_width, g_prec, canonAngle(roll_x1));
+
+
+  bool show_debug = g_debug;
+  if (1)
   {
-    printf(" ignore below here----\n");
+    double e_yaw_z1, e_pitch_y1, e_roll_x1;
+    double e_yaw_z2, e_pitch_y2, e_roll_x2;
+    m.getEulerYPR(e_yaw_z1, e_pitch_y1, e_roll_x1, 1);
+    m.getEulerYPR(e_yaw_z2, e_pitch_y2, e_roll_x2, 2);
+
+    tf::Quaternion mq;
+    m.getRotation(mq);
+
+    tf::Quaternion aaq(axis, angle);
+    canonicalize(aaq);
+
+    tf::Quaternion rpyq;
+    rpyq.setRPY(roll_x1, pitch_y1, yaw_z1);
+    canonicalize(rpyq);
+
+    tf::Quaternion rpyq2;
+    rpyq2.setRPY(roll_x2, pitch_y2, yaw_z2);
+    canonicalize(rpyq2);
+
+    bool err = false;
+
+    if (!QUAT_CHECK_EQUAL(q,mq))
+      show_debug = true;
+    if (!QUAT_CHECK_EQUAL(q,aaq))
+      show_debug = true;
+    if (!QUAT_CHECK_EQUAL(q,rpyq))
+      show_debug = true;
+    if (!QUAT_CHECK_EQUAL(q,rpyq2))
+      show_debug = true;
+  }
+  if (show_debug)
+  {
+    printf("----EXTRA DEBUG INFO FOLLOWS----\n");
 
     double e_yaw_z1, e_pitch_y1, e_roll_x1;
     m.getEulerYPR(e_yaw_z1, e_pitch_y1, e_roll_x1, 1);
@@ -281,7 +348,7 @@ static void show(tf::Quaternion q)
       g_width, g_prec, mq.z(),
       g_width, g_prec, mq.w());
 
-      tf::Quaternion aaq(axis, angle);
+    tf::Quaternion aaq(axis, angle);
     canonicalize(aaq);
     printf("A->Q: qx=%*.*f qy=%*.*f qz=%*.*f qw=%*.*f (normalized)\n",
       g_width, g_prec, aaq.x(),
