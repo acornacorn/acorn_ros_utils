@@ -38,19 +38,34 @@
 
 #include <tf/tf.h>
 #include <boost/math/constants/constants.hpp>
+#include <ctype.h>
 
 static const double PI = (boost::math::constants::pi<double>());
 
 int g_prec = 10;
 int g_width = 0;
 
-bool g_debug = true;
+bool g_debug = false;
 
+// canonicalize quaternion
+//   - normalize
+//   - ensure w >= 0
 static void canonicalize(tf::Quaternion& q)
 {
   q.normalize();
   if (q.w() < 0.0)
     q *= -1.0;
+}
+
+// Canonicalize angle
+// ensure between PI and -PI
+static double canonAngle(double a)
+{
+  while(a > PI)
+    a -= 2.0 * PI;
+  while(a <= -PI)
+    a += 2.0 * PI;
+  return a;
 }
 
 static void MatrixToYPR(
@@ -60,21 +75,6 @@ static void MatrixToYPR(
   double *roll,
   int solution=0)
 {
-#if 0
-printf("  M\n");
-printf("  %10.4f  %10.4f %10.4f\n",
-m[0][0],
-m[0][1],
-m[0][2]);
-printf("  %10.4f  %10.4f %10.4f\n",
-m[1][0],
-m[1][1],
-m[1][2]);
-printf("  %10.4f  %10.4f %10.4f\n",
-m[2][0],
-m[2][1],
-m[2][2]);
-#endif
   double x,y,z = 0;
   if (std::abs(m[2][0]) < 1.0)
   {
@@ -84,52 +84,36 @@ m[2][2]);
     double cy = cos(y);
     x = atan2(m[2][1]/cy, m[2][2]/cy);
     z = atan2(m[1][0]/cy, m[0][0]/cy);
-printf("~~~~~ case 1\n");
   }
 
-#if 0
-  else
-  {
-    x = atan2(m[2][1], m[2][2]);
-printf("x = atan2(m[2][1], m[2][2]) = atan2(%f , %f) = %f\n",
-m[2][1], m[2][2], x);
-    if (m[2][0] < 0)
-    {
-      y = PI * 0.5;
-printf("~~~~~ case 2\n");
-    }
-    else
-    {
-      y = -PI * 0.5;
-printf("~~~~~ case 3\n");
-    }
-  }
-
-#else
   else if (m[2][0] < 0.0)
   {
     y = PI * 0.5;
     x = atan2(m[0][1], m[0][2]);
-printf("~~~~~ case 2      WARNING tf::getEulerYPR BROKEN FOR THIS CASE\n");
-printf("x = atan2(m[0][1], m[0][2]) = atan2(%f , %f) = %f\n",
-  m[0][1], m[0][2], x);
+    if (g_debug)
+    {
+      printf("~~~~~ case 2    WARNING tf::getEulerYPR BROKEN FOR THIS CASE\n");
+      printf("x = atan2(m[0][1], m[0][2]) = atan2(%f , %f) = %f\n",
+        m[0][1], m[0][2], x);
+    }
 
   }
   else
   {
     y = -PI * 0.5;
     x = atan2(-m[0][1], -m[0][2]);
-printf("~~~~~ case 3      WARNING tf::getEulerYPR BROKEN FOR THIS CASE\n");
-printf("x = atan2(-m[0][1], -m[0][2]) = atan2(%f , %f) = %f\n",
-  -m[0][1], -m[0][2], x);
+    if (g_debug)
+    {
+      printf("~~~~~ case 3    WARNING tf::getEulerYPR BROKEN FOR THIS CASE\n");
+      printf("x = atan2(-m[0][1], -m[0][2]) = atan2(%f , %f) = %f\n",
+        -m[0][1], -m[0][2], x);
+    }
   }
-#endif
     
   *roll = x;    // psi
   *pitch = y;   // theta
   *yaw = z;     // phi
 }
-// .5 .5 .5 -.5
 
 static void show(tf::Quaternion q)
 {
@@ -145,13 +129,9 @@ static void show(tf::Quaternion q)
     g_width, g_prec, q.z(),
     g_width, g_prec, q.w());
 
-  double angle = q.getAngle();
+  double angle = canonAngle(q.getAngle());
   tf::Vector3 axis = q.getAxis();
   {
-    if (angle > PI)
-    {
-      angle -= PI * 2.0;
-    }
     double biggest = 0.0;
     for (int i = 0 ; i < 3 ; i++)
     {
@@ -176,17 +156,13 @@ static void show(tf::Quaternion q)
       g_width, g_prec, axis.getX(),
       g_width, g_prec, axis.getY(),
       g_width, g_prec, axis.getZ(),
-      g_width, g_prec, angle,
-      g_width, g_prec, angle * 180.0 / PI);
+      g_width, g_prec, canonAngle(angle),
+      2+g_width, g_prec, canonAngle(angle) * 180.0 / PI);
   }
 
   {
-    double angle = q.getAngleShortestPath();
+    double angle = canonAngle(q.getAngleShortestPath());
     tf::Vector3 axis = q.getAxis();
-    if (angle > PI)
-    {
-      angle -= PI * 2.0;
-    }
     double biggest = 0.0;
     for (int i = 0 ; i < 3 ; i++)
     {
@@ -209,8 +185,8 @@ static void show(tf::Quaternion q)
       g_width, g_prec, axis.getX(),
       g_width, g_prec, axis.getY(),
       g_width, g_prec, axis.getZ(),
-      g_width, g_prec, angle,
-      g_width, g_prec, angle * 180.0 / PI);
+      g_width, g_prec, canonAngle(angle),
+      2+g_width, g_prec, canonAngle(angle) * 180.0 / PI);
   }
 
   tf::Matrix3x3 m(q);
@@ -237,216 +213,126 @@ static void show(tf::Quaternion q)
   MatrixToYPR(m, &yaw_z2, &pitch_y2, &roll_x2, 1);
 #endif
 
-#if 0
-  double yaw_z1b, pitch_y1b, roll_x1b;
-  double yaw_z2b, pitch_y2b, roll_x2b;
-  MatrixToYPR(m, &yaw_z1b, &pitch_y1b, &roll_x1b, 0);
-  MatrixToYPR(m, &yaw_z2b, &pitch_y2b, &roll_x2b, 1);
-#endif
-
-
   printf("URDF: rpy=\"%*.*f %*.*f %*.*f\"\n",
-    g_width, g_prec, roll_x1,
-    g_width, g_prec, pitch_y1,
-    g_width, g_prec, yaw_z1);
+    g_width, g_prec, canonAngle(roll_x1),
+    g_width, g_prec, canonAngle(pitch_y1),
+    g_width, g_prec, canonAngle(yaw_z1));
   printf("StaticTransformPub: 0 0 0 %*.*f %*.*f %*.*f  (YPR)\n",
-    g_width, g_prec, yaw_z1,
-    g_width, g_prec, pitch_y1,
-    g_width, g_prec, roll_x1);
+    g_width, g_prec, canonAngle(yaw_z1),
+    g_width, g_prec, canonAngle(pitch_y1),
+    g_width, g_prec, canonAngle(roll_x1));
   printf("YPR:  yaw_z=%*.*f pitch_y=%*.*f roll_x=%*.*f  (solution 1)\n",
-    g_width, g_prec, yaw_z1,
-    g_width, g_prec, pitch_y1,
-    g_width, g_prec, roll_x1);
+    g_width, g_prec, canonAngle(yaw_z1),
+    g_width, g_prec, canonAngle(pitch_y1),
+    g_width, g_prec, canonAngle(roll_x1));
   printf("YPR:  yaw_z=%*.*f pitch_y=%*.*f roll_x=%*.*f  (solution 2)\n",
-    g_width, g_prec, yaw_z2,
-    g_width, g_prec, pitch_y2,
-    g_width, g_prec, roll_x2);
+    g_width, g_prec, canonAngle(yaw_z2),
+    g_width, g_prec, canonAngle(pitch_y2),
+    g_width, g_prec, canonAngle(roll_x2));
 
   printf("YPR:  yaw_z=%*.*f pitch_y=%*.*f roll_x=%*.*f  (s1 degrees)\n",
-    g_width, g_prec, yaw_z1 * 180.0/PI,
-    g_width, g_prec, pitch_y1 * 180.0/PI,
-    g_width, g_prec, roll_x1 * 180.0/PI);
+    2+g_width, g_prec, canonAngle(yaw_z1) * 180.0/PI,
+    2+g_width, g_prec, canonAngle(pitch_y1) * 180.0/PI,
+    2+g_width, g_prec, canonAngle(roll_x1) * 180.0/PI);
   printf("YPR:  yaw_z=%*.*f pitch_y=%*.*f roll_x=%*.*f  (s2 degrees)\n",
-    g_width, g_prec, yaw_z2 * 180.0/PI,
-    g_width, g_prec, pitch_y2 * 180.0/PI,
-    g_width, g_prec, roll_x2 * 180.0/PI);
+    2+g_width, g_prec, canonAngle(yaw_z2) * 180.0/PI,
+    2+g_width, g_prec, canonAngle(pitch_y2) * 180.0/PI,
+    2+g_width, g_prec, canonAngle(roll_x2) * 180.0/PI);
 
-#if 0
-  printf("YPRb: yaw_z=%*.*f pitch_y=%*.*f roll_x=%*.*f  (s1 degrees)\n",
-    g_width, g_prec, yaw_z1b * 180.0/PI,
-    g_width, g_prec, pitch_y1b * 180.0/PI,
-    g_width, g_prec, roll_x1b * 180.0/PI);
-  printf("YPRb: yaw_z=%*.*f pitch_y=%*.*f roll_x=%*.*f  (s2 degrees)\n",
-    g_width, g_prec, yaw_z2b * 180.0/PI,
-    g_width, g_prec, pitch_y2b * 180.0/PI,
-    g_width, g_prec, roll_x2b * 180.0/PI);
+  if (g_debug)
+  {
+    printf(" ignore below here----\n");
 
-#endif
+    double e_yaw_z1, e_pitch_y1, e_roll_x1;
+    m.getEulerYPR(e_yaw_z1, e_pitch_y1, e_roll_x1, 1);
+    printf("EYPR: yaw_z=%*.*f pitch_y=%*.*f roll_x=%*.*f  (solution 1)\n",
+      g_width, g_prec, canonAngle(e_yaw_z1),
+      g_width, g_prec, canonAngle(e_pitch_y1),
+      g_width, g_prec, canonAngle(e_roll_x1));
+    double e_yaw_z2, e_pitch_y2, e_roll_x2;
+    m.getEulerYPR(e_yaw_z2, e_pitch_y2, e_roll_x2, 2);
+    printf("EYPR: yaw_z=%*.*f pitch_y=%*.*f roll_x=%*.*f  (solution 2)\n",
+      g_width, g_prec, canonAngle(e_yaw_z2),
+      g_width, g_prec, canonAngle(e_pitch_y2),
+      g_width, g_prec, canonAngle(e_roll_x2));
 
-  printf(" ignore below here----\n");
-
-  double e_yaw_z1, e_pitch_y1, e_roll_x1;
-  m.getEulerYPR(e_yaw_z1, e_pitch_y1, e_roll_x1, 1);
-  printf("EYPR: yaw_z=%*.*f pitch_y=%*.*f roll_x=%*.*f  (solution 1)\n",
-    g_width, g_prec, e_yaw_z1,
-    g_width, g_prec, e_pitch_y1,
-    g_width, g_prec, e_roll_x1);
-  double e_yaw_z2, e_pitch_y2, e_roll_x2;
-  m.getEulerYPR(e_yaw_z2, e_pitch_y2, e_roll_x2, 2);
-  printf("EYPR: yaw_z=%*.*f pitch_y=%*.*f roll_x=%*.*f  (solution 2)\n",
-    g_width, g_prec, e_yaw_z2,
-    g_width, g_prec, e_pitch_y2,
-    g_width, g_prec, e_roll_x2);
-
-  printf("EYPR: yaw_z=%*.*f pitch_y=%*.*f roll_x=%*.*f  (s1 degrees)\n",
-    g_width, g_prec, e_yaw_z1 * 180.0/PI,
-    g_width, g_prec, e_pitch_y1 * 180.0/PI,
-    g_width, g_prec, e_roll_x1 * 180.0/PI);
-  printf("EYPR: yaw_z=%*.*f pitch_y=%*.*f roll_x=%*.*f  (s2 degrees)\n",
-    g_width, g_prec, e_yaw_z2 * 180.0/PI,
-    g_width, g_prec, e_pitch_y2 * 180.0/PI,
-    g_width, g_prec, e_roll_x2 * 180.0/PI);
+    printf("EYPR: yaw_z=%*.*f pitch_y=%*.*f roll_x=%*.*f  (s1 degrees)\n",
+      2+g_width, g_prec, canonAngle(e_yaw_z1) * 180.0/PI,
+      2+g_width, g_prec, canonAngle(e_pitch_y1) * 180.0/PI,
+      2+g_width, g_prec, canonAngle(e_roll_x1) * 180.0/PI);
+    printf("EYPR: yaw_z=%*.*f pitch_y=%*.*f roll_x=%*.*f  (s2 degrees)\n",
+      2+g_width, g_prec, canonAngle(e_yaw_z2) * 180.0/PI,
+      2+g_width, g_prec, canonAngle(e_pitch_y2) * 180.0/PI,
+      2+g_width, g_prec, canonAngle(e_roll_x2) * 180.0/PI);
 
 
+    printf("Quat: qx=%*.*f qy=%*.*f qz=%*.*f qw=%*.*f (normalized)\n",
+      g_width, g_prec, q.x(),
+      g_width, g_prec, q.y(),
+      g_width, g_prec, q.z(),
+      g_width, g_prec, q.w());
 
+    tf::Quaternion mq;
+    m.getRotation(mq);
+    canonicalize(mq);
+    printf("M->Q: qx=%*.*f qy=%*.*f qz=%*.*f qw=%*.*f (normalized)\n",
+      g_width, g_prec, mq.x(),
+      g_width, g_prec, mq.y(),
+      g_width, g_prec, mq.z(),
+      g_width, g_prec, mq.w());
 
+      tf::Quaternion aaq(axis, angle);
+    canonicalize(aaq);
+    printf("A->Q: qx=%*.*f qy=%*.*f qz=%*.*f qw=%*.*f (normalized)\n",
+      g_width, g_prec, aaq.x(),
+      g_width, g_prec, aaq.y(),
+      g_width, g_prec, aaq.z(),
+      g_width, g_prec, aaq.w());
 
+    tf::Quaternion rpyq;
+    rpyq.setRPY(roll_x1, pitch_y1, yaw_z1);
+    canonicalize(rpyq);
+    printf("R->Q: qx=%*.*f qy=%*.*f qz=%*.*f qw=%*.*f (normalized)\n",
+      g_width, g_prec, rpyq.x(),
+      g_width, g_prec, rpyq.y(),
+      g_width, g_prec, rpyq.z(),
+      g_width, g_prec, rpyq.w());
 
-
-
-#if 1
-  printf("Quat: qx=%*.*f qy=%*.*f qz=%*.*f qw=%*.*f (normalized)\n",
-    g_width, g_prec, q.x(),
-    g_width, g_prec, q.y(),
-    g_width, g_prec, q.z(),
-    g_width, g_prec, q.w());
-
-  tf::Quaternion mq;
-  m.getRotation(mq);
-  canonicalize(mq);
-  printf("M->Q: qx=%*.*f qy=%*.*f qz=%*.*f qw=%*.*f (normalized)\n",
-    g_width, g_prec, mq.x(),
-    g_width, g_prec, mq.y(),
-    g_width, g_prec, mq.z(),
-    g_width, g_prec, mq.w());
-
-    tf::Quaternion aaq(axis, angle);
-  canonicalize(aaq);
-  printf("A->Q: qx=%*.*f qy=%*.*f qz=%*.*f qw=%*.*f (normalized)\n",
-    g_width, g_prec, aaq.x(),
-    g_width, g_prec, aaq.y(),
-    g_width, g_prec, aaq.z(),
-    g_width, g_prec, aaq.w());
-
-  tf::Quaternion rpyq;
-  rpyq.setRPY(roll_x1, pitch_y1, yaw_z1);
-  canonicalize(rpyq);
-  printf("R->Q: qx=%*.*f qy=%*.*f qz=%*.*f qw=%*.*f (normalized)\n",
-    g_width, g_prec, rpyq.x(),
-    g_width, g_prec, rpyq.y(),
-    g_width, g_prec, rpyq.z(),
-    g_width, g_prec, rpyq.w());
-
-  tf::Quaternion rpyq2;
-  rpyq2.setRPY(roll_x2, pitch_y2, yaw_z2);
-  canonicalize(rpyq2);
-  printf("2->Q: qx=%*.*f qy=%*.*f qz=%*.*f qw=%*.*f (normalized)\n",
-    g_width, g_prec, rpyq2.x(),
-    g_width, g_prec, rpyq2.y(),
-    g_width, g_prec, rpyq2.z(),
-    g_width, g_prec, rpyq2.w());
-
-
-
-
-#if 0
-  tf::Quaternion rpyqb;
-  rpyqb.setRPY(roll_x1b, pitch_y1b, yaw_z1b);
-  canonicalize(rpyqb);
-  printf("R->Qb qx=%*.*f qy=%*.*f qz=%*.*f qw=%*.*f (normalized)\n",
-    g_width, g_prec, rpyqb.x(),
-    g_width, g_prec, rpyqb.y(),
-    g_width, g_prec, rpyqb.z(),
-    g_width, g_prec, rpyqb.w());
-
-  tf::Quaternion rpyq2b;
-  rpyq2b.setRPY(roll_x2b, pitch_y2b, yaw_z2b);
-  canonicalize(rpyq2b);
-  printf("2->Qb qx=%*.*f qy=%*.*f qz=%*.*f qw=%*.*f (normalized)\n",
-    g_width, g_prec, rpyq2b.x(),
-    g_width, g_prec, rpyq2b.y(),
-    g_width, g_prec, rpyq2b.z(),
-    g_width, g_prec, rpyq2b.w());
-#endif
-
-
-
-
-
-
-
-  tf::Quaternion e_rpyq;
-  e_rpyq.setEuler(e_yaw_z1, e_pitch_y1, e_roll_x1);
-  canonicalize(e_rpyq);
-  printf("E->Q: qx=%*.*f qy=%*.*f qz=%*.*f qw=%*.*f (normalized)\n",
-    g_width, g_prec, e_rpyq.x(),
-    g_width, g_prec, e_rpyq.y(),
-    g_width, g_prec, e_rpyq.z(),
-    g_width, g_prec, e_rpyq.w());
-
-  tf::Quaternion e_rpyq2;
-  e_rpyq2.setEuler(e_yaw_z2, e_pitch_y2, e_roll_x2);
-  canonicalize(e_rpyq2);
-  printf("2->Q: qx=%*.*f qy=%*.*f qz=%*.*f qw=%*.*f (normalized)\n",
-    g_width, g_prec, e_rpyq2.x(),
-    g_width, g_prec, e_rpyq2.y(),
-    g_width, g_prec, e_rpyq2.z(),
-    g_width, g_prec, e_rpyq2.w());
-
-
-
-
-
-  tf::Quaternion e_rpyqb;
-  e_rpyqb.setEuler(e_roll_x1, e_pitch_y1, e_yaw_z1);
-  canonicalize(e_rpyqb);
-  printf("E>>Q: qx=%*.*f qy=%*.*f qz=%*.*f qw=%*.*f (normalized)\n",
-    g_width, g_prec, e_rpyqb.x(),
-    g_width, g_prec, e_rpyqb.y(),
-    g_width, g_prec, e_rpyqb.z(),
-    g_width, g_prec, e_rpyqb.w());
-
-  tf::Quaternion e_rpyq2b;
-  e_rpyq2b.setEuler(e_roll_x2, e_pitch_y2, e_yaw_z2);
-  canonicalize(e_rpyq2b);
-  printf("2>>Q: qx=%*.*f qy=%*.*f qz=%*.*f qw=%*.*f (normalized)\n",
-    g_width, g_prec, e_rpyq2b.x(),
-    g_width, g_prec, e_rpyq2b.y(),
-    g_width, g_prec, e_rpyq2b.z(),
-    g_width, g_prec, e_rpyq2b.w());
-
-
-  tf::Matrix3x3 rpym;
-  rpym.setEulerYPR(e_roll_x2, e_pitch_y2, e_yaw_z2);
-  tf::Quaternion rpymq;
-  rpym.getRotation(rpymq);
-  printf("RMQ:  qx=%*.*f qy=%*.*f qz=%*.*f qw=%*.*f (normalized)\n",
-    g_width, g_prec, rpymq.x(),
-    g_width, g_prec, rpymq.y(),
-    g_width, g_prec, rpymq.z(),
-    g_width, g_prec, rpymq.w());
-
-
-
-// .5 .5 .5 -.5
-
-
-
-#endif
+    tf::Quaternion rpyq2;
+    rpyq2.setRPY(roll_x2, pitch_y2, yaw_z2);
+    canonicalize(rpyq2);
+    printf("2->Q: qx=%*.*f qy=%*.*f qz=%*.*f qw=%*.*f (normalized)\n",
+      g_width, g_prec, rpyq2.x(),
+      g_width, g_prec, rpyq2.y(),
+      g_width, g_prec, rpyq2.z(),
+      g_width, g_prec, rpyq2.w());
+  }
 }
 
+bool getMoreChars(std::string* sline,
+                  const char **s1,
+                  const char **s2,
+                  const char **s3)
+{
+  size_t s1p = *s1 - sline->c_str();
+  size_t s2p = *s2 - sline->c_str();
+  size_t s3p = *s3 - sline->c_str();
+  
+  std::string sline2;
+  std::getline(std::cin, sline2);
+  if (sline2.empty() || (sline2.size() == 1 && sline2[0] == '\n'))
+  {
+    return false;
+  }
 
-bool readRot(const char **ss, tf::Quaternion *result)
+  *sline = *sline + ";" + sline2 + ";";
+  *s1 = sline->c_str() + s1p;
+  *s2 = sline->c_str() + s2p;
+  *s3 = sline->c_str() + s3p;
+  return true;
+}
+
+bool readRot(const char **ss, tf::Quaternion *result, std::string* sline)
 {
   const char *line = *ss;
   const char *s = line;
@@ -456,16 +342,37 @@ bool readRot(const char **ss, tf::Quaternion *result)
 
   bool use_rpy = false;
   bool use_aa = false;
-  if (s[0] == 'r' && s[1] == 'p' && s[2] == 'y')
+  bool use_mtx = false;
+  if (tolower(s[0]) == 'r' && tolower(s[1]) == 'p' && tolower(s[2]) == 'y')
     use_rpy = true;
-  if (s[0] == 'a' && s[1] == 'a')
+  if (tolower(s[0]) == 'a' && tolower(s[1]) == 'a')
     use_aa = true;
+  if (tolower(s[0]) == 'm' && tolower(s[1]) == '=')
+    use_mtx = true;
+  if (tolower(s[0]) == 'm' && tolower(s[1]) == 't' && tolower(s[2]) == 'x')
+    use_mtx = true;
+  if (tolower(s[0]) == 'd' && tolower(s[1]) == 'b' && tolower(s[2]) == 'g')
+  {
+    g_debug = !g_debug;
+    printf("Debug mode is now %s\n",
+      g_debug ? "ON" : "OFF");
+  }
 
   int nv = 0;
-  double v[4];
+  double v[9];
   const char *last_e = s;
-  for (; *s ; ++s)
+  for (;; ++s)
   {
+    if (use_mtx && !*s && (nv==3 || nv==6))
+    {
+      if (!getMoreChars(sline, &s, &line, &last_e))
+      {
+        printf("Bad input line[%ld]: '%s'\n", long(s-line), line);
+        return false;
+      }
+    }
+    if (!*s)
+      break;
     if (*s == '*')
       break;
     char *e = NULL;
@@ -475,7 +382,9 @@ bool readRot(const char **ss, tf::Quaternion *result)
     s = e;
     last_e = e;
     nv++;
-    if (nv == 4)
+    if (nv == 4 && !use_mtx)
+      break;
+    if (nv == 9)
       break;
   }
 
@@ -521,8 +430,8 @@ bool readRot(const char **ss, tf::Quaternion *result)
         g_width, g_prec, v[0],
         g_width, g_prec, v[1],
         g_width, g_prec, v[2],
-        g_width, g_prec, angle,
-        g_width, g_prec, angle * 180.0/PI);
+        g_width, g_prec, canonAngle(angle),
+        2+g_width, g_prec, canonAngle(angle) * 180.0/PI);
     }
   }
   else if (nv == 4)
@@ -551,13 +460,13 @@ bool readRot(const char **ss, tf::Quaternion *result)
       if (g_debug)
       {
         printf("Using rz=%*.*f ry=%*.*f rx=%*.*f\n",
-          g_width, g_prec, v[2],
-          g_width, g_prec, v[1],
-          g_width, g_prec, v[0]);
+          g_width, g_prec, canonAngle(v[2]),
+          g_width, g_prec, canonAngle(v[1]),
+          g_width, g_prec, canonAngle(v[0]));
         printf("Using rz=%*.*f ry=%*.*f rx=%*.*f degrees\n",
-          g_width, g_prec, v[2] * 180.0/PI,
-          g_width, g_prec, v[1] * 180.0/PI,
-          g_width, g_prec, v[0] * 180.0/PI);
+          2+g_width, g_prec, canonAngle(v[2]) * 180.0/PI,
+          2+g_width, g_prec, canonAngle(v[1]) * 180.0/PI,
+          2+g_width, g_prec, canonAngle(v[0]) * 180.0/PI);
       }
     }
     else
@@ -566,14 +475,37 @@ bool readRot(const char **ss, tf::Quaternion *result)
       if (g_debug)
       {
         printf("Using rz=%*.*f ry=%*.*f rx=%*.*f\n",
-          g_width, g_prec, v[0],
-          g_width, g_prec, v[1],
-          g_width, g_prec, v[2]);
+          g_width, g_prec, canonAngle(v[0]),
+          g_width, g_prec, canonAngle(v[1]),
+          g_width, g_prec, canonAngle(v[2]));
         printf("Using rz=%*.*f ry=%*.*f rx=%*.*f degrees\n",
-          g_width, g_prec, v[0] * 180.0/PI,
-          g_width, g_prec, v[1] * 180.0/PI,
-          g_width, g_prec, v[2] * 180.0/PI);
+          2+g_width, g_prec, canonAngle(v[0]) * 180.0/PI,
+          2+g_width, g_prec, canonAngle(v[1]) * 180.0/PI,
+          2+g_width, g_prec, canonAngle(v[2]) * 180.0/PI);
       }
+    }
+  }
+  else if (nv==9)
+  {
+    tf::Matrix3x3 m(
+        v[0], v[1], v[2],
+        v[3], v[4], v[5],
+        v[6], v[7], v[8]);
+    m.getRotation(*result);
+    if (g_debug)
+    {
+      printf("Using mtx= %*.*f %*.*f %*.*f\n",
+        g_width, g_prec, v[0],
+        g_width, g_prec, v[1],
+        g_width, g_prec, v[2]);
+      printf("           %*.*f %*.*f %*.*f\n",
+        g_width, g_prec, v[3],
+        g_width, g_prec, v[4],
+        g_width, g_prec, v[5]);
+      printf("           %*.*f %*.*f %*.*f\n",
+        g_width, g_prec, v[6],
+        g_width, g_prec, v[7],
+        g_width, g_prec, v[8]);
     }
   }
   else
@@ -585,32 +517,43 @@ bool readRot(const char **ss, tf::Quaternion *result)
   return true;
 }
 
-
 int main(int argc, char *argv[])
 {
   g_width = g_prec + 3;
+
+  printf("\n");
   printf("INSTRUCTIONS:\n");
+  printf("Enter a rotation or product of rotations.  Rotation is one of:\n");
+  printf(" <qx> <qy> <qz> <qw>    - quaternion\n");
+  printf(" <rz> <ry> <rx>         - eulerZYX"
+                                  " (static transform publisher order)\n");
+  printf(" rpy=<rx> <ry> <rz>     - URDF order\n");
+  printf(" aa=<x> <y> <z> <a>     - axis angle\n");
+  printf(" mtx=<xx> <xy> <xz> <yx> <yy> <yz> <zx> <zy> <zz>\n");
+  printf("                        - matrix (can optionally span 3 lines)\n");
+  printf(" <precision>                    - set precision for output\n");
+
+  printf("Extra (non numeric) chars before/between/after each number are"
+        " ignored.\n");
+  printf("End rotation with a d for degrees (otherwise radians assumed)\n");
+  printf("Concat multiple rotations with * to see product\n");
+  printf("NOTE: both YPR and URDF are **applied** in rz*ry*rx order\n");
+  printf("To enable debug type: dbg\n");
   printf("Setting width=%d precision=%d  (enter 1 or 2 numbers to set)\n",
     g_width, g_prec);
-  printf("Quaternion: qx qy qz qw\n");
-  printf("YPR:        rz ry rx (static transform publisher order)\n");
-  printf("URDF:       rpy=rx ry rz   (NOTE: still applied in order rz, ry, rx)\n");
-  printf("Axis Angle: aa=ax ay az angle  (follow angle by \"d\" for degrees)\n");
-  printf("Use * to concatenate rotations.\n");
+  printf("\n");
+
   for (;;)
   {
     printf("#######################\n");
     printf("Enter qx qy qz qw  or  rz ry rx : ");
     std::string sline;
     std::getline(std::cin, sline);
-    double v[4];
-    int nv = 0;
     sline += ";"; // ensure there is a terminator
-    const char *line = sline.c_str();
-    const char *s = line;
+    const char *s = sline.c_str();
 
     tf::Quaternion q;
-    if (readRot(&s, &q))
+    if (readRot(&s, &q, &sline))
     {
       show(q);
 
@@ -618,7 +561,7 @@ int main(int argc, char *argv[])
       {
         s++;
         tf::Quaternion q2;
-        if (readRot(&s, &q2))
+        if (readRot(&s, &q2, &sline))
         {
           printf("------- q2:\n");
           show(q2);
